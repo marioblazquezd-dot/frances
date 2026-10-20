@@ -1,0 +1,466 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practicar francés</title>
+
+<style>
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f3f4f6;
+    min-height: 100vh;
+    margin: 0;
+    padding: 16px;
+    display: grid;
+    place-items: center;
+  }
+
+  main {
+    width: 100%;
+    max-width: 420px;
+    background: white;
+    padding: 28px;
+    border-radius: 18px;
+    text-align: center;
+    box-shadow: 0 6px 25px rgba(0,0,0,0.07);
+  }
+
+  h1 {
+    font-size: 32px;
+    margin: 28px 0;
+  }
+
+  input, button {
+    width: 100%;
+    padding: 14px;
+    font-size: 18px;
+    margin: 8px 0;
+    border-radius: 10px;
+  }
+
+  input {
+    border: 1px solid #d1d5db;
+    outline-color: #2563eb;
+  }
+
+  button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    cursor: pointer;
+  }
+
+  button:hover {
+    opacity: 0.9;
+  }
+
+  #opciones button {
+    background: #e5e7eb;
+    color: #111827;
+    border: 1px solid #d1d5db;
+  }
+
+  #opciones button:disabled {
+    opacity: 0.65;
+    cursor: default;
+  }
+
+  #mensaje {
+    min-height: 25px;
+    font-weight: 500;
+  }
+
+  #progreso {
+    color: #6b7280;
+    font-size: 14px;
+  }
+
+  #estadisticas {
+    color: #6b7280;
+    font-size: 14px;
+  }
+
+  .barra {
+    height: 7px;
+    background: #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 15px 0;
+  }
+
+  #barraProgreso {
+    height: 100%;
+    width: 0%;
+    background: #2563eb;
+    transition: width 0.3s;
+  }
+</style>
+</head>
+
+<body>
+
+<main>
+  <p id="progreso">Cargando vocabulario...</p>
+
+  <div class="barra">
+    <div id="barraProgreso"></div>
+  </div>
+
+  <h1 id="pregunta"></h1>
+
+  <input
+    id="respuesta"
+    placeholder="Escribe en francés"
+    autocomplete="off"
+    autocapitalize="off"
+    spellcheck="false"
+  >
+
+  <button id="comprobar">Comprobar</button>
+
+  <div id="opciones" style="display:none"></div>
+
+  <p id="mensaje"></p>
+
+  <p id="estadisticas"></p>
+</main>
+
+<script>
+
+// ==========================================
+// VARIABLES
+// ==========================================
+
+let palabras = [];
+let indice = 0;
+let intentos = 0;
+let errores = 0;
+let bloqueado = false;
+
+const pregunta = document.getElementById("pregunta");
+const input = document.getElementById("respuesta");
+const mensaje = document.getElementById("mensaje");
+const progreso = document.getElementById("progreso");
+const boton = document.getElementById("comprobar");
+const opcionesDiv = document.getElementById("opciones");
+const estadisticas = document.getElementById("estadisticas");
+const barraProgreso = document.getElementById("barraProgreso");
+
+
+// ==========================================
+// FUNCIONES AUXILIARES
+// ==========================================
+
+function normalizar(texto) {
+  return texto
+    .trim()
+    .toLocaleLowerCase("fr")
+    .normalize("NFC");
+}
+
+function mezclar(lista) {
+  for (let i = lista.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+
+    [lista[i], lista[j]] = [lista[j], lista[i]];
+  }
+
+  return lista;
+}
+
+function actualizarEstadisticas() {
+  estadisticas.textContent =
+    `Errores: ${errores}`;
+}
+
+
+// ==========================================
+// CARGAR PALABRAS DESDE CSV
+// ==========================================
+
+async function cargarCSV() {
+  try {
+    const respuesta = await fetch("palabras.csv", {
+      cache: "no-store"
+    });
+
+    if (!respuesta.ok) {
+      throw new Error("No se encuentra palabras.csv");
+    }
+
+    const texto = await respuesta.text();
+
+    palabras = texto
+      .replace(/^\uFEFF/, "")
+      .trim()
+      .split(/\r?\n/)
+      .slice(1)
+      .filter(linea => linea.trim())
+      .map(linea =>
+        linea.split(",").map(x => x.trim())
+      )
+      .filter(partes =>
+        partes.length === 2 &&
+        partes[0] &&
+        partes[1]
+      )
+      .map(([espanol, frances]) => ({
+        espanol,
+        frances
+      }));
+
+    if (palabras.length === 0) {
+      throw new Error("El archivo CSV está vacío");
+    }
+
+    mezclar(palabras);
+
+    mostrar();
+
+  } catch (error) {
+    progreso.textContent = "Error al cargar vocabulario";
+    mensaje.textContent = error.message;
+    input.hidden = true;
+    boton.hidden = true;
+  }
+}
+
+
+// ==========================================
+// MOSTRAR SIGUIENTE PALABRA
+// ==========================================
+
+function mostrar() {
+
+  if (indice >= palabras.length) {
+    finalizar();
+    return;
+  }
+
+  intentos = 0;
+  bloqueado = false;
+
+  pregunta.textContent = palabras[indice].espanol;
+
+  progreso.textContent =
+    `Palabra ${indice + 1} de ${palabras.length}`;
+
+  barraProgreso.style.width =
+    `${(indice / palabras.length) * 100}%`;
+
+  input.value = "";
+  input.hidden = false;
+
+  boton.hidden = false;
+  boton.textContent = "Comprobar";
+  boton.onclick = comprobar;
+
+  opcionesDiv.style.display = "none";
+  opcionesDiv.innerHTML = "";
+
+  mensaje.textContent = "";
+
+  actualizarEstadisticas();
+
+  input.focus();
+}
+
+
+// ==========================================
+// COMPROBAR RESPUESTA ESCRITA
+// ==========================================
+
+
+function comprobar() {
+
+  if (bloqueado || intentos >= 1) return;
+
+  const escrita = normalizar(input.value);
+  const correcta = normalizar(
+    palabras[indice].frances
+  );
+
+  if (escrita === correcta) {
+
+    bloqueado = true;
+
+    mensaje.textContent = "✅ ¡Correcto!";
+    mensaje.style.color = "green";
+
+    indice++;
+
+    setTimeout(mostrar, 600);
+
+  } else {
+
+    errores++;
+    intentos++;
+
+    actualizarEstadisticas();
+
+    // Tras el primer error, mostrar 3 opciones
+    mostrarOpciones();
+
+  }
+}
+
+
+
+// ==========================================
+// MOSTRAR 3 OPCIONES
+// ==========================================
+
+function mostrarOpciones() {
+
+  input.hidden = true;
+  boton.hidden = true;
+
+  mensaje.textContent =
+    "Elige la traducción correcta:";
+
+  mensaje.style.color = "#111827";
+
+  const correcta = palabras[indice].frances;
+
+  // Obtener palabras incorrectas del CSV
+
+  const incorrectas = [
+    ...new Set(
+      palabras
+        .map(p => p.frances)
+        .filter(p =>
+          normalizar(p) !== normalizar(correcta)
+        )
+    )
+  ];
+
+  mezclar(incorrectas);
+
+  // Crear tres opciones en orden aleatorio
+
+  const opciones = mezclar([
+    correcta,
+    ...incorrectas.slice(0, 2)
+  ]);
+
+  opcionesDiv.innerHTML = "";
+  opcionesDiv.style.display = "block";
+
+  opciones.forEach(opcion => {
+
+    const button = document.createElement("button");
+
+    button.textContent = opcion;
+
+    button.onclick = () =>
+      elegirOpcion(opcion, button);
+
+    opcionesDiv.appendChild(button);
+
+  });
+}
+
+
+// ==========================================
+// COMPROBAR OPCIÓN SELECCIONADA
+// ==========================================
+
+function elegirOpcion(opcion, button) {
+
+  if (bloqueado) return;
+
+  const correcta = palabras[indice].frances;
+
+  if (
+    normalizar(opcion) === normalizar(correcta)
+  ) {
+
+    bloqueado = true;
+
+    button.style.background = "#bbf7d0";
+
+    mensaje.textContent = "✅ ¡Correcto!";
+    mensaje.style.color = "green";
+
+    indice++;
+
+    setTimeout(mostrar, 800);
+
+  } else {
+
+    errores++;
+
+    button.style.background = "#fecaca";
+    button.disabled = true;
+
+    mensaje.textContent =
+      "❌ Incorrecto. Prueba otra opción.";
+
+    mensaje.style.color = "red";
+
+    actualizarEstadisticas();
+  }
+}
+
+
+// ==========================================
+// FINALIZAR SESIÓN
+// ==========================================
+
+function finalizar() {
+
+  pregunta.textContent = "¡Completado! 🎉";
+
+  progreso.textContent =
+    `${palabras.length} palabras practicadas`;
+
+  barraProgreso.style.width = "100%";
+
+  input.hidden = true;
+  opcionesDiv.style.display = "none";
+
+  mensaje.textContent =
+    `Has terminado con ${errores} errores.`;
+
+  mensaje.style.color = "#111827";
+
+  boton.hidden = false;
+  boton.textContent = "Volver a practicar";
+
+  boton.onclick = () => location.reload();
+
+  actualizarEstadisticas();
+}
+
+
+// ==========================================
+// EVENTOS
+// ==========================================
+
+boton.onclick = comprobar;
+
+input.addEventListener("keydown", e => {
+
+  if (e.key === "Enter") {
+    comprobar();
+  }
+
+});
+
+
+// ==========================================
+// INICIAR
+// ==========================================
+
+cargarCSV();
+
+</script>
+
+</body>
+</html>
