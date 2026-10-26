@@ -4,109 +4,88 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Practicar francés</title>
-
+<title>Francés - Repaso inteligente</title>
 <style>
-  * {
-    box-sizing: border-box;
-  }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
-  body {
-    font-family: system-ui, sans-serif;
-    background: #f3f4f6;
-    min-height: 100vh;
-    margin: 0;
-    padding: 16px;
-    display: grid;
-    place-items: center;
-  }
+body {
+  font-family: system-ui, sans-serif;
+  background: #f3f4f6;
+  min-height: 100vh;
+  margin: 0;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+}
 
-  main {
-    width: 100%;
-    max-width: 420px;
-    background: white;
-    padding: 28px;
-    border-radius: 18px;
-    text-align: center;
-    box-shadow: 0 6px 25px rgba(0,0,0,0.07);
-  }
+main {
+  width: 100%;
+  max-width: 440px;
+  background: white;
+  padding: 28px;
+  border-radius: 18px;
+  text-align: center;
+  box-shadow: 0 6px 25px #00000012;
+}
 
-  h1 {
-    font-size: 32px;
-    margin: 28px 0;
-  }
+h1 { font-size: 32px; margin: 24px 0; }
 
-  input, button {
-    width: 100%;
-    padding: 14px;
-    font-size: 18px;
-    margin: 8px 0;
-    border-radius: 10px;
-  }
+input, button {
+  width: 100%;
+  padding: 14px;
+  margin: 8px 0;
+  font-size: 18px;
+  border-radius: 10px;
+}
 
-  input {
-    border: 1px solid #d1d5db;
-    outline-color: #2563eb;
-  }
+input { border: 1px solid #d1d5db; }
 
-  button {
-    background: #2563eb;
-    color: white;
-    border: none;
-    cursor: pointer;
-  }
+button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
 
-  button:hover {
-    opacity: 0.9;
-  }
+button:disabled { cursor: default; }
 
-  #opciones button {
-    background: #e5e7eb;
-    color: #111827;
-    border: 1px solid #d1d5db;
-  }
+#opciones button {
+  background: #e5e7eb;
+  color: #111827;
+}
 
-  #opciones button:disabled {
-    opacity: 0.65;
-    cursor: default;
-  }
+#mensaje {
+  min-height: 25px;
+  font-weight: 500;
+}
 
-  #mensaje {
-    min-height: 25px;
-    font-weight: 500;
-  }
+#progreso, #estadisticas {
+  color: #6b7280;
+  font-size: 14px;
+}
 
-  #progreso {
-    color: #6b7280;
-    font-size: 14px;
-  }
+.barra {
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+}
 
-  #estadisticas {
-    color: #6b7280;
-    font-size: 14px;
-  }
+#barraProgreso {
+  height: 100%;
+  width: 0;
+  background: #2563eb;
+  transition: width .3s;
+}
 
-  .barra {
-    height: 7px;
-    background: #e5e7eb;
-    border-radius: 10px;
-    overflow: hidden;
-    margin: 15px 0;
-  }
-
-  #barraProgreso {
-    height: 100%;
-    width: 0%;
-    background: #2563eb;
-    transition: width 0.3s;
-  }
+.secundario { background: #64748b; }
 </style>
 </head>
 
 <body>
-
 <main>
-  <p id="progreso">Cargando vocabulario...</p>
+  <p id="progreso">Cargando palabras...</p>
 
   <div class="barra">
     <div id="barraProgreso"></div>
@@ -124,24 +103,33 @@
 
   <button id="comprobar">Comprobar</button>
 
-  <div id="opciones" style="display:none"></div>
+  <div id="opciones" hidden></div>
 
   <p id="mensaje"></p>
-
   <p id="estadisticas"></p>
+
+  <button id="reiniciar" class="secundario" hidden>
+    Nueva sesión
+  </button>
 </main>
 
 <script>
+// CONFIGURACIÓN
+const PREGUNTAS_POR_SESION = 50;
+const CLAVE_MEMORIA = "frances_memoria_v1";
 
-// ==========================================
 // VARIABLES
-// ==========================================
-
 let palabras = [];
+let memoria = {};
+let actual = null;
+let anterior = null;
 let indice = 0;
-let intentos = 0;
 let errores = 0;
+let aciertosDirectos = 0;
 let bloqueado = false;
+let modoOpciones = false;
+let fallada = false;
+let temporizador = null;
 
 const pregunta = document.getElementById("pregunta");
 const input = document.getElementById("respuesta");
@@ -150,199 +138,290 @@ const progreso = document.getElementById("progreso");
 const boton = document.getElementById("comprobar");
 const opcionesDiv = document.getElementById("opciones");
 const estadisticas = document.getElementById("estadisticas");
-const barraProgreso = document.getElementById("barraProgreso");
+const barra = document.getElementById("barraProgreso");
+const reiniciar = document.getElementById("reiniciar");
 
-
-// ==========================================
-// FUNCIONES AUXILIARES
-// ==========================================
-
+// NORMALIZAR PALABRAS
 function normalizar(texto) {
-  return texto
-    .trim()
-    .toLocaleLowerCase("fr")
+  return texto.trim().toLocaleLowerCase("fr")
     .normalize("NFC");
 }
 
+// IDENTIFICADOR DE CADA PALABRA
+function clave(p) {
+  return JSON.stringify([
+    normalizar(p.espanol),
+    normalizar(p.frances)
+  ]);
+}
+
+// CARGAR MEMORIA
+function cargarMemoria() {
+  try {
+    memoria = JSON.parse(
+      localStorage.getItem(CLAVE_MEMORIA)
+    ) || {};
+  } catch {
+    memoria = {};
+  }
+}
+
+// GUARDAR MEMORIA
+function guardarMemoria() {
+  try {
+    localStorage.setItem(
+      CLAVE_MEMORIA,
+      JSON.stringify(memoria)
+    );
+  } catch (e) {
+    console.warn("No se pudo guardar el progreso", e);
+  }
+}
+
+// OBTENER ESTADÍSTICAS DE UNA PALABRA
+function obtenerDatos(p) {
+  const id = clave(p);
+
+  if (!memoria[id]) {
+    memoria[id] = {
+      dominio: 0,
+      aciertos: 0,
+      fallos: 0
+    };
+  }
+
+  return memoria[id];
+}
+
+// MEZCLAR
 function mezclar(lista) {
   for (let i = lista.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-
     [lista[i], lista[j]] = [lista[j], lista[i]];
   }
-
   return lista;
 }
 
-function actualizarEstadisticas() {
-  estadisticas.textContent =
-    `Errores: ${errores}`;
-}
-
-
-// ==========================================
-// CARGAR PALABRAS DESDE CSV
-// ==========================================
-
+// LEER CSV
 async function cargarCSV() {
   try {
-    const respuesta = await fetch("palabras.csv", {
+    const res = await fetch("palabras.csv", {
       cache: "no-store"
     });
 
-    if (!respuesta.ok) {
+    if (!res.ok) {
       throw new Error("No se encuentra palabras.csv");
     }
 
-    const texto = await respuesta.text();
+    const texto = (await res.text())
+      .replace(/^\uFEFF/, "");
 
-    palabras = texto
-      .replace(/^\uFEFF/, "")
-      .trim()
-      .split(/\r?\n/)
-      .slice(1)
-      .filter(linea => linea.trim())
-      .map(linea =>
-        linea.split(",").map(x => x.trim())
-      )
-      .filter(partes =>
-        partes.length === 2 &&
-        partes[0] &&
-        partes[1]
-      )
-      .map(([espanol, frances]) => ({
-        espanol,
-        frances
-      }));
+    const lineas = texto.split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean);
 
-    if (palabras.length === 0) {
-      throw new Error("El archivo CSV está vacío");
+    // Detectar cabecera opcional
+    if (
+      lineas[0] &&
+      /^(espanol|español)\s*,\s*(frances|francés)$/i
+        .test(lineas[0])
+    ) {
+      lineas.shift();
     }
 
-    mezclar(palabras);
+    palabras = lineas.map(linea => {
+      const partes = linea.split(",");
+      if (partes.length !== 2) return null;
 
-    mostrar();
+      return {
+        espanol: partes[0].trim(),
+        frances: partes[1].trim()
+      };
+    }).filter(p => p && p.espanol && p.frances);
 
-  } catch (error) {
-    progreso.textContent = "Error al cargar vocabulario";
-    mensaje.textContent = error.message;
+    // Eliminar filas duplicadas
+    palabras = [
+      ...new Map(
+        palabras.map(p => [clave(p), p])
+      ).values()
+    ];
+
+    if (!palabras.length) {
+      throw new Error("El CSV no tiene palabras válidas");
+    }
+
+    cargarMemoria();
+    iniciarSesion();
+
+  } catch (e) {
+    progreso.textContent = "Error";
+    mensaje.textContent = e.message;
     input.hidden = true;
     boton.hidden = true;
   }
 }
 
+// PESO: MENOS DOMINIO = MÁS PROBABILIDAD
+function calcularPeso(p) {
+  const datos = obtenerDatos(p);
 
-// ==========================================
-// MOSTRAR SIGUIENTE PALABRA
-// ==========================================
+  // Una palabra dominada sigue pudiendo aparecer.
+  const pesos = [12, 8, 5, 3, 2, 1];
 
+  const dominio = Math.max(
+    0, Math.min(5, datos.dominio)
+  );
+
+  return pesos[dominio];
+}
+
+// ELEGIR PALABRA SEGÚN SU PESO
+function elegirPalabra() {
+  // Evita repetir inmediatamente si hay alternativas.
+  const candidatas = palabras.length > 1
+    ? palabras.filter(p => clave(p) !== anterior)
+    : palabras;
+
+  const total = candidatas.reduce(
+    (suma, p) => suma + calcularPeso(p), 0
+  );
+
+  let azar = Math.random() * total;
+
+  for (const p of candidatas) {
+    azar -= calcularPeso(p);
+    if (azar < 0) return p;
+  }
+
+  return candidatas[candidatas.length - 1];
+}
+
+// INICIAR SESIÓN
+function iniciarSesion() {
+  clearTimeout(temporizador);
+  indice = 0;
+  errores = 0;
+  aciertosDirectos = 0;
+  anterior = null;
+
+  reiniciar.hidden = true;
+  input.hidden = false;
+  boton.hidden = false;
+
+  mostrar();
+}
+
+// MOSTRAR PREGUNTA
 function mostrar() {
-
-  if (indice >= palabras.length) {
+  if (indice >= PREGUNTAS_POR_SESION) {
     finalizar();
     return;
   }
 
-  intentos = 0;
+  actual = elegirPalabra();
+  anterior = clave(actual);
   bloqueado = false;
+  modoOpciones = false;
+  fallada = false;
 
-  pregunta.textContent = palabras[indice].espanol;
-
+  pregunta.textContent = actual.espanol;
   progreso.textContent =
-    `Palabra ${indice + 1} de ${palabras.length}`;
+    `Pregunta ${indice + 1} de ${PREGUNTAS_POR_SESION}`;
 
-  barraProgreso.style.width =
-    `${(indice / palabras.length) * 100}%`;
+  barra.style.width =
+    `${indice / PREGUNTAS_POR_SESION * 100}%`;
 
-  input.value = "";
   input.hidden = false;
-
   boton.hidden = false;
-  boton.textContent = "Comprobar";
-  boton.onclick = comprobar;
-
-  opcionesDiv.style.display = "none";
+  input.value = "";
+  opcionesDiv.hidden = true;
   opcionesDiv.innerHTML = "";
-
   mensaje.textContent = "";
 
   actualizarEstadisticas();
-
   input.focus();
 }
 
+// ACTUALIZAR CONTADORES
+function actualizarEstadisticas() {
+  estadisticas.textContent =
+    `Aciertos directos: ${aciertosDirectos} | Errores: ${errores}`;
+}
 
-// ==========================================
+// RESPUESTA CORRECTA
+function acertar(directo) {
+  bloqueado = true;
+  const datos = obtenerDatos(actual);
+
+  datos.aciertos++;
+
+  if (directo && !fallada) {
+    datos.dominio = Math.min(5, datos.dominio + 1);
+    aciertosDirectos++;
+  }
+
+  // Una respuesta por opciones no aumenta el dominio.
+  guardarMemoria();
+
+  mensaje.textContent = "✅ ¡Correcto!";
+  mensaje.style.color = "green";
+
+  indice++;
+  actualizarEstadisticas();
+  temporizador = setTimeout(mostrar, 650);
+}
+
+// REGISTRAR FALLO
+function registrarFallo() {
+  errores++;
+  const datos = obtenerDatos(actual);
+
+  datos.fallos++;
+  datos.dominio = Math.max(0, datos.dominio - 1);
+
+  guardarMemoria();
+  actualizarEstadisticas();
+}
+
 // COMPROBAR RESPUESTA ESCRITA
-// ==========================================
-
-
 function comprobar() {
+  if (bloqueado || modoOpciones || !actual) return;
 
-  if (bloqueado || intentos >= 1) return;
+  const respuesta = normalizar(input.value);
+  if (!respuesta) return;
 
-  const escrita = normalizar(input.value);
-  const correcta = normalizar(
-    palabras[indice].frances
-  );
-
-  if (escrita === correcta) {
-
-    bloqueado = true;
-
-    mensaje.textContent = "✅ ¡Correcto!";
-    mensaje.style.color = "green";
-
-    indice++;
-
-    setTimeout(mostrar, 600);
-
+  if (respuesta === normalizar(actual.frances)) {
+    acertar(true);
   } else {
-
-    errores++;
-    intentos++;
-
-    actualizarEstadisticas();
-
-    // Tras el primer error, mostrar 3 opciones
+    fallada = true;
+    registrarFallo();
     mostrarOpciones();
-
   }
 }
 
-
-
-// ==========================================
 // MOSTRAR 3 OPCIONES
-// ==========================================
-
 function mostrarOpciones() {
-
+  modoOpciones = true;
   input.hidden = true;
   boton.hidden = true;
 
   mensaje.textContent =
-    "Elige la traducción correcta:";
+    "❌ Incorrecto. Elige la respuesta:";
+  mensaje.style.color = "#dc2626";
 
-  mensaje.style.color = "#111827";
-
-  const correcta = palabras[indice].frances;
-
-  // Obtener palabras incorrectas del CSV
+  const correcta = actual.frances;
 
   const incorrectas = [
-    ...new Set(
+    ...new Map(
       palabras
-        .map(p => p.frances)
         .filter(p =>
-          normalizar(p) !== normalizar(correcta)
+          normalizar(p.frances) !== normalizar(correcta)
         )
-    )
+        .map(p => [normalizar(p.frances), p.frances])
+    ).values()
   ];
 
   mezclar(incorrectas);
-
-  // Crear tres opciones en orden aleatorio
 
   const opciones = mezclar([
     correcta,
@@ -350,117 +429,65 @@ function mostrarOpciones() {
   ]);
 
   opcionesDiv.innerHTML = "";
-  opcionesDiv.style.display = "block";
+  opcionesDiv.hidden = false;
 
   opciones.forEach(opcion => {
+    const b = document.createElement("button");
+    b.textContent = opcion;
 
-    const button = document.createElement("button");
+    b.onclick = () => {
+      if (bloqueado) return;
 
-    button.textContent = opcion;
+      if (normalizar(opcion) === normalizar(correcta)) {
+        b.style.background = "#bbf7d0";
+        acertar(false);
+      } else {
+        registrarFallo();
+        b.disabled = true;
+        b.style.background = "#fecaca";
+        mensaje.textContent =
+          "❌ Prueba otra opción.";
+      }
+    };
 
-    button.onclick = () =>
-      elegirOpcion(opcion, button);
-
-    opcionesDiv.appendChild(button);
-
+    opcionesDiv.appendChild(b);
   });
 }
 
-
-// ==========================================
-// COMPROBAR OPCIÓN SELECCIONADA
-// ==========================================
-
-function elegirOpcion(opcion, button) {
-
-  if (bloqueado) return;
-
-  const correcta = palabras[indice].frances;
-
-  if (
-    normalizar(opcion) === normalizar(correcta)
-  ) {
-
-    bloqueado = true;
-
-    button.style.background = "#bbf7d0";
-
-    mensaje.textContent = "✅ ¡Correcto!";
-    mensaje.style.color = "green";
-
-    indice++;
-
-    setTimeout(mostrar, 800);
-
-  } else {
-
-    errores++;
-
-    button.style.background = "#fecaca";
-    button.disabled = true;
-
-    mensaje.textContent =
-      "❌ Incorrecto. Prueba otra opción.";
-
-    mensaje.style.color = "red";
-
-    actualizarEstadisticas();
-  }
-}
-
-
-// ==========================================
-// FINALIZAR SESIÓN
-// ==========================================
-
+// FINALIZAR
 function finalizar() {
+  bloqueado = true;
 
-  pregunta.textContent = "¡Completado! 🎉";
-
+  pregunta.textContent = "¡Sesión terminada! 🎉";
   progreso.textContent =
-    `${palabras.length} palabras practicadas`;
+    `${PREGUNTAS_POR_SESION} preguntas completadas`;
 
-  barraProgreso.style.width = "100%";
+  barra.style.width = "100%";
 
   input.hidden = true;
-  opcionesDiv.style.display = "none";
+  boton.hidden = true;
+  opcionesDiv.hidden = true;
 
   mensaje.textContent =
-    `Has terminado con ${errores} errores.`;
+    `Aciertos sin ayuda: ${aciertosDirectos} / ${PREGUNTAS_POR_SESION}`;
 
   mensaje.style.color = "#111827";
 
-  boton.hidden = false;
-  boton.textContent = "Volver a practicar";
-
-  boton.onclick = () => location.reload();
-
   actualizarEstadisticas();
+  reiniciar.hidden = false;
 }
 
-
-// ==========================================
 // EVENTOS
-// ==========================================
-
-boton.onclick = comprobar;
+boton.addEventListener("click", comprobar);
 
 input.addEventListener("keydown", e => {
-
-  if (e.key === "Enter") {
-    comprobar();
-  }
-
+  if (e.key === "Enter") comprobar();
 });
 
+reiniciar.addEventListener("click", iniciarSesion);
 
-// ==========================================
 // INICIAR
-// ==========================================
-
 cargarCSV();
-
 </script>
-
 </body>
 </html>
